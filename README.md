@@ -32,6 +32,10 @@ A parser generator for scala.
 6. Parallelism of any sort.
     - potential conflicts with automata generation unless we're smart
 
+# Thoughts
+
+- [parallel parsing](http://people.eecs.berkeley.edu/~kubitron/courses/cs252-S09/projects/reports/project5_report_ver2.pdf)
+
 # The Name is Dumb
 
 It's called termites because termites attack wood and books and paper and whatnot. Using DSLs and parser combinators can be viewed as breaking down a language into smaller parts (smaller parsers).
