@@ -10,11 +10,14 @@ A parser generator for scala.
     - make this suitable for csv parsing as well as compilers
     - "validated" string types (strings that are the result of a parse) can organize text so that the type system forbids creating invalid strings
     - consider easy methods to turn output into traversable tree
+    - make into an "orm for parsing"
+        - make serialization/deserialization (parsing/codegen) implicit
 3. Integrate tokenization into parsing.
     - give parsers control over their own token stream
     - use meaningful defaults and allow overrides
 4. Combine parsers.
-    - parser-controlled tokenization makes this difficult
+    - allow for stack traces and automatic generation / visualization of parse trees
+        - this might allow being turned off for speed reasons? but that'd be super chill
 5. Re-entrant, streaming, interruptible parsing with multiple modes of operation.
 
 ## Reach Goals
