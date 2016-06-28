@@ -1,7 +1,7 @@
 termites
 ========
 
-A parser generator for scala.
+A parser generator for scala, prototyped with coffeescript.
 
 # Goals
 
