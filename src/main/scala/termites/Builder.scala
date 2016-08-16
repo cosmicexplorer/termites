@@ -32,76 +32,63 @@ object Builder {
   // all of the below is for ENPDAs (nondeterministic PDAs with epsilon
   // transitions); we'll have different classes for DPDAs
 
-  // decouples identity from location in memory
-  object StackSymbol {
-    private var idCounter: Long = 0
-    // TODO: more scalable uniqueness check! make it thread-safe!
-    def getId(): Long = {
-      idCounter += 1
-      idCounter
-    }
-  }
-  class StackSymbol {
-    private val id: Long = StackSymbol.getId()
-    // TODO: just override .equal()?
-    def isSame(other: StackSymbol): Boolean = id == other.id
-  }
+  // all symbols will just be compared by whether they're the same object
+  class StackSymbol
 
   // TODO: add functionality here when converting ENPDA -> DPDA
   sealed trait StackOp
   case class Push(syms: StackSymbol*) extends StackOp
   object Pop extends StackOp
 
-  // TODO: implementation of this is easy, but could be faster / tail recursive
-  // to refactor so that can reuse states
-  class StateTree(transitions: Transition*) {
-    def addTransition(trans: Transition): StateTree =
-      new StateTree((trans +: transitions): _*)
-    // binary operations
-    // NOTE: this is mutually recursive through Transition! can cause stack
-    // overflow! also, cycles DEFINITELY cause stack overflow!
-    def then(next: StateTree): StateTree =
-      new StateTree(transitions.map(_.addStateAfter(next)): _*)
-    // TODO: need "or with priority"
-    def or(other: StateTree): StateTree =
-      new StateTree(Epsilon(this), Epsilon(other))
-    // unary operations
-    // *
-    def star: StateTree = then(new StateTree(Epsilon(this)))
-    // +
-    def plus: StateTree = then(star)
-    // ?
-    def maybe: StateTree = or(new FinalState)
-  }
-  class FinalState(
-    transitions: Transition*
-  ) extends StateTree(transitions: _*) {
-    override def then(next: StateTree): StateTree =
-      super.then(next).addTransition(Epsilon(next))
-  }
+  class State
 
   // TODO: update for things-not-strings!
   case class Token(ch: Char)
 
   // tok = None means epsilon transition, stackTop = None means this transition
   // applies for any stack symbol
-  sealed trait Transition {
-    // in all cases when taking the transition leads to a final state, instead
-    // go to "next"
-    def addStateAfter(next: StateTree): Transition
-  }
-  case class Epsilon(toState: StateTree) extends Transition {
-    override def addStateAfter(next: StateTree): Transition =
-      Epsilon(toState.then(next))
-  }
+  sealed abstract class Transition(val from: State, val to: State)
+  case class Epsilon(from: State, to: State) extends Transition(from, to)
   case class FullTransition(
+    from: State,
+    to: State,
     tok: Token,
     stackTop: Symbol,
-    toState: StateTree,
     op: StackOp
-  ) extends Transition {
-    override def addStateAfter(next: StateTree): Transition =
-      FullTransition(tok, stackTop, toState.then(next), op)
+  ) extends Transition(from, to)
+
+  // one final state; just use e-transitions to final state
+  // edge list representation
+  case class ENPDA(start: State, fin: State, transitions: Seq[Transition]) {
+    /* binary operators */
+    def then(next: ENPDA): ENPDA = {
+      val toNext = Epsilon(fin, next.start)
+      val newTrans = toNext +: (transitions ++ next.transitions)
+      ENPDA(start, next.fin, newTrans)
+    }
+
+    def or(other: ENPDA): ENPDA = {
+      val newStart = new State
+      val newEnd = new State
+      val newTrans = Seq(
+        Epsilon(newStart, start),
+        Epsilon(newStart, other.start),
+        Epsilon(fin, newEnd),
+        Epsilon(other.fin, newEnd))
+      ENPDA(newStart, newEnd, newTrans ++ transitions ++ other.transitions)
+    }
+
+    /* unary operators */
+    // *
+    def star: ENPDA = {
+      val newSt = new State
+      val newTrans = Seq(Epsilon(newSt, start), Epsilon(fin, newSt))
+      ENPDA(newSt, newSt, newTrans ++ transitions)
+    }
+    // +
+    def plus: ENPDA = ENPDA(start, fin, Epsilon(fin, start) +: transitions)
+    // ?
+    def maybe: ENPDA = ENPDA(start, fin, Epsilon(start, fin) +: transitions)
   }
 }
 
