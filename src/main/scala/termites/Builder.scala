@@ -39,43 +39,57 @@ object Builder {
   sealed trait StackOp
   case class Push(syms: StackSymbol*) extends StackOp
   object Pop extends StackOp
+  object NoOp extends StackOp
 
+  // all that matters for states is whether they're the same
   class State
 
   // TODO: update for things-not-strings!
   case class Token(ch: Char)
 
+  sealed trait StackTransition
+  object Stackless extends StackTransition
+  case class StackAware(
+    stackTop: StackSymbol, op: StackOp
+  ) extends StackTransition
+
   // tok = None means epsilon transition, stackTop = None means this transition
   // applies for any stack symbol
-  sealed abstract class Transition(val from: State, val to: State)
-  case class Epsilon(from: State, to: State) extends Transition(from, to)
+  sealed abstract class Transition(val from: State, val to: State) {
+    def mapStates(map: (State => State)): Transition
+  }
+  case class Epsilon(f: State, t: State) extends Transition(f, t) {
+    override def mapStates(map: (State => State)): Transition =
+      Epsilon(map(f), map(t))
+  }
   case class FullTransition(
-    from: State,
-    to: State,
+    f: State,
+    t: State,
     tok: Token,
-    stackTop: Symbol,
-    op: StackOp
-  ) extends Transition(from, to)
+    trans: StackTransition
+  ) extends Transition(f, t) {
+    override def mapStates(map: (State => State)): Transition =
+      FullTransition(map(f), map(t), tok, trans)
+  }
 
-  // one final state; just use e-transitions to final state
+  // there's only one final state; just use e-transitions to final state
   // edge list representation
+  // no validation that any transitions contain start or fin
   case class ENPDA(start: State, fin: State, transitions: Seq[Transition]) {
     /* binary operators */
-    def then(next: ENPDA): ENPDA = {
-      val toNext = Epsilon(fin, next.start)
-      val newTrans = toNext +: (transitions ++ next.transitions)
-      ENPDA(start, next.fin, newTrans)
-    }
+    def then(next: ENPDA): ENPDA =
+      ENPDA(start, next.fin,
+        Epsilon(fin, next.start) +: (transitions ++ next.transitions))
 
     def or(other: ENPDA): ENPDA = {
       val newStart = new State
+      val startTrans = Seq(
+        Epsilon(newStart, start), Epsilon(newStart, other.start))
       val newEnd = new State
-      val newTrans = Seq(
-        Epsilon(newStart, start),
-        Epsilon(newStart, other.start),
-        Epsilon(fin, newEnd),
-        Epsilon(other.fin, newEnd))
-      ENPDA(newStart, newEnd, newTrans ++ transitions ++ other.transitions)
+      val endTrans = Seq(
+        Epsilon(fin, newEnd), Epsilon(other.fin, newEnd))
+      ENPDA(newStart, newEnd,
+        startTrans ++ endTrans ++ transitions ++ other.transitions)
     }
 
     /* unary operators */
@@ -89,7 +103,56 @@ object Builder {
     def plus: ENPDA = ENPDA(start, fin, Epsilon(fin, start) +: transitions)
     // ?
     def maybe: ENPDA = ENPDA(start, fin, Epsilon(start, fin) +: transitions)
+    // {n}
+    def multiple(times: Int): ENPDA = multiple(times, getVisited)
+    private def multiple(times: Int, visited: Set[State]): ENPDA = {
+      require(times >= 0, "cannot perform a negative multiple of a PDA")
+      if (0 == times) {
+        ENPDA.MultIdentity
+      } else {
+        (2 to times).foldLeft(this) { (cur, _) =>
+          cur.then(copyWithVisited(visited))
+        }
+      }
+    }
+    // {m, n}
+    def range(from: Int, to: Int): ENPDA = {
+      require(to >= from,
+        "greater bound of multiple must be greater than lesser bound")
+      val visited = getVisited
+      val lowerBound = multiple(from, visited)
+      (from + 1 to to).foldLeft(lowerBound) { (cur, _) =>
+        cur.then(copyWithVisited(visited).maybe)
+      }
+    }
+
+    /* utilities */
+    private def getVisited: Set[State] =
+      transitions.foldLeft(Set.empty[State]) { (set, trans) =>
+        set + trans.from + trans.to
+      }
+    private def copyWithVisited(visited: Set[State]): ENPDA = {
+      val stateMap = visited.toSeq.map(_ -> new State).toMap
+      val newTrans = transitions.map(_.mapStates(stateMap))
+      ENPDA(stateMap(start), stateMap(fin), newTrans)
+    }
   }
+  object ENPDA {
+    val MultIdentity: ENPDA = {
+      val newSt = new State
+      ENPDA(newSt, newSt, Seq())
+    }
+  }
+
+  def fromLiteral(from: String): ENPDA =
+    from.foldLeft(ENPDA.MultIdentity) { (pda, char) =>
+      val st = new State
+      val end = new State
+      val trans = new FullTransition(st, end, Token(char), Stackless)
+      pda.then(ENPDA(st, end, Seq(trans)))
+    }
+  // TODO: parsing is fun! (vomit)
+  def fromRegex(regex: String): ENPDA = ???
 }
 
 /* Phase 2: convert (e-n-)PDAs to optimal deterministic PDAs without epsilon
