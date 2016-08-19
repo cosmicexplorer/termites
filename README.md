@@ -46,3 +46,9 @@ It's called termites because termites attack wood and books and paper and whatno
 # License
 
 [GPL](GPL.md)
+
+# TODO
+
+- methods to add more power
+    - multiple stacks?
+    - looking all the way down the stack?

@@ -1,5 +1,7 @@
 package termites
 
+import termites.Build._
+
 /* Phase 2: convert (e-n-)PDAs to optimal deterministic PDAs without epsilon
 transitions.
 
@@ -7,8 +9,47 @@ This process is pretty standard. We need to ensure we make the data structures
 created in Phase 1 useful for this task. The output should be a PDA which
 performs an O(1) operation per input token.
 */
-object Parser {
-  
+object Parse {
+  // used as "key" for big transition hash table
+  case class TransitionKey[T](from: State, sym: StackSymbol, tok: Token[T])
+  // used as "value" for big transition hash table
+  case class TransitionValue(to: State, op: StackOp)
+  // maintains state
+  case class DPDAState(state: State, stack: List[StackSymbol])
+
+  class TransitionNotFoundException extends Exception
+
+  // TODO: optimize
+  class DPDA[T](enpda: ENPDA[T]) {
+    // this is guaranteed to be unique from any of the symbols of the ENPDA, so
+    // we should never be popping a stack to empty
+    // TODO: make sure we never pop a stack until empty!
+    val initialStack = new StackSymbol
+    val Enumerated(states, tokens, stackSyms) = enpda.enumerate
+    // TODO: build this! ensure all transitions which don't care about stack
+    // handle initialStack
+    val table: Map[TransitionKey[T], TransitionValue] = ???
+
+    private def initialState: DPDAState =
+      new DPDAState(enpda.start, List(initialStack))
+
+    def parse(str: Traversable[T]): Boolean = {
+      try {
+        val finalState = str.foldLeft(initialState) { (cur, ch) =>
+          // TODO: don't let stack get empty in the first place!
+          val key = TransitionKey(cur.state, cur.stack.head, Token(ch))
+          val value = table.get(key).getOrElse {
+            throw new TransitionNotFoundException
+          }
+          val newStack = value.op.invoke(cur.stack)
+          DPDAState(value.to, newStack)
+        }
+        enpda.fin.contains(finalState.state)
+      } catch {
+        case _: TransitionNotFoundException => false
+      }
+    }
+  }
 }
 
 /* Phase 3: add API to parse strings into objects.
