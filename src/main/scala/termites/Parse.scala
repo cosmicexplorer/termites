@@ -13,7 +13,7 @@ object Parse {
   // used as "key" for big transition hash table
   case class TransitionKey[T](from: State, sym: StackSymbol, tok: Token[T])
   // used as "value" for big transition hash table
-  case class TransitionValue(to: State, op: StackOp)
+  case class TransitionValue(to: State, op: StackOperation)
   // maintains state
   case class DPDAState(state: State, stack: List[StackSymbol])
 
@@ -27,7 +27,9 @@ object Parse {
     val initialStack = new StackSymbol
     val Enumerated(states, tokens, stackSyms) = enpda.enumerate
     // TODO: build this! ensure all transitions which don't care about stack
-    // handle initialStack
+    // handle initialStack. also add an epsilon transition which only works when
+    // initialStack is on top from all final states to a NEW final state which
+    // has no transitions out of it
     val table: Map[TransitionKey[T], TransitionValue] = ???
 
     private def initialState: DPDAState =
