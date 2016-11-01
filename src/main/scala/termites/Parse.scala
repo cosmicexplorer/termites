@@ -10,7 +10,8 @@ created in Phase 1 useful for this task. The output should be a PDA which
 performs an O(1) operation per input token.
 */
 object Parse {
-  // used as "key" for big transition hash table
+  // used as "key" for big transition hash table; this is the instantaneous
+  // description ("ID")
   case class TransitionKey[T](from: State, sym: StackSymbol, tok: Token[T])
   // used as "value" for big transition hash table
   case class TransitionValue(to: State, op: StackOperation)
@@ -19,18 +20,24 @@ object Parse {
 
   class TransitionNotFoundException extends Exception
 
+  case class DeterministicTransition[T](
+    from: State,
+    to: State,
+    token: Token[T],
+    op: StackOperation
+  )
+
   // TODO: optimize
   class DPDA[T](enpda: ENPDA[T]) {
     // this is guaranteed to be unique from any of the symbols of the ENPDA, so
     // we should never be popping a stack to empty
-    // TODO: make sure we never pop a stack until empty!
     val initialStack = new StackSymbol
-    val Enumerated(states, tokens, stackSyms) = enpda.enumerate
     // TODO: build this! ensure all transitions which don't care about stack
     // handle initialStack. also add an epsilon transition which only works when
     // initialStack is on top from all final states to a NEW final state which
     // has no transitions out of it
-    val table: Map[TransitionKey[T], TransitionValue] = ???
+    val table: Map[TransitionKey[T], TransitionValue] =
+      DPDA.makeTransitionMap(initialStack, enpda)
 
     private def initialState: DPDAState =
       new DPDAState(enpda.start, List(initialStack))
@@ -38,7 +45,6 @@ object Parse {
     def parse(str: Traversable[T]): Boolean = {
       try {
         val finalState = str.foldLeft(initialState) { (cur, ch) =>
-          // TODO: don't let stack get empty in the first place!
           val key = TransitionKey(cur.state, cur.stack.head, Token(ch))
           val value = table.get(key).getOrElse {
             throw new TransitionNotFoundException
@@ -46,10 +52,20 @@ object Parse {
           val newStack = value.op.invoke(cur.stack)
           DPDAState(value.to, newStack)
         }
+        // TODO: we should have only one final state
         enpda.fin.contains(finalState.state)
       } catch {
         case _: TransitionNotFoundException => false
       }
+    }
+  }
+  object DPDA {
+    def makeTransitionMap[T](
+      initStack: StackSymbol, enpda: ENPDA[T]
+    ): Map[TransitionKey[T], TransitionValue] = {
+      val byFrom = enpda.transitions.groupBy(_.from)
+      val byTo = enpda.transitions.groupBy(_.to)
+
     }
   }
 }

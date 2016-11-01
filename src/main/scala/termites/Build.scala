@@ -42,24 +42,66 @@ object Build {
 
   case class Token[T](ch: T)
 
+  sealed trait SymbolMovementResult
+  case class Success(op: StackOperation) extends SymbolMovementResult
+  object Failure extends SymbolMovementResult
+  object FollowMoreTransitions extends SymbolMovementResult
+
   sealed trait StackOperation {
     // whether a specific symbol is required at top of stack to transition
     val stackTop: Option[StackSymbol]
     def invoke(stack: List[StackSymbol]): List[StackSymbol]
-    // used in DPDA creation; None implies the transition should be removed
-    def addSymbolBefore(sym: StackSymbol): Option[StackOperation]
-    def stackSyms: Set[StackSymbol]
+    // used in DPDA creation
+    // None implies the transition should be removed
+    def addSymbolBefore(sym: StackSymbol): SymbolMovementResult
+    // used in DPDA creation
+    def popSymbolBefore(sym: StackSymbol): SymbolMovementResult
+    def symsInOperation: Set[StackSymbol]
+  }
+
+  sealed trait TopPop {
+    def topSym: Option[StackSymbol]
+    def invoke(stack: List[StackSymbol]): List[StackSymbol]
+  }
+  case class Pop(top: StackSymbol) extends TopPop {
+    override def topSym: Option[StackSymbol] = Some(top)
+    override def invoke(stack: List[StackSymbol]): List[StackSymbol] = {
+      // TODO: remove contracts in prod builds somehow?
+      require(!stack.isEmpty, "can't pop empty stack")
+      stack.tail
+    } ensuring(!_.isEmpty, "popping stack should never be empty")
+  }
+  case class NoPop(top: Option[StackSymbol]) extends TopPop {
+    override def topSym: Option[StackSymbol] = top
+    override def invoke(stack: List[StackSymbol]): List[StackSymbol] = stack
+  }
+
+  class StackOp(topPop: TopPop, pushSyms: Seq[StackSymbol]) {
+    val stackTop: Option[StackSymbol] = topPop.topSym
+    val symsStackDelta = pushSyms.reverse.toList
+    def invoke(stack: List[StackSymbol]): List[StackSymbol] =
+      symsStackDelta ::: topPop.invoke(stack)
   }
   // syms are added as if the leftmost is pushed first, then rightwards
   class Push(top: Option[StackSymbol], syms: StackSymbol*)
       extends StackOperation {
+    require(!syms.isEmpty, "cannot push no symbols")
     val symsStackDelta = syms.reverse.toList
     override val stackTop: Option[StackSymbol] = top
     override def invoke(stack: List[StackSymbol]): List[StackSymbol] =
       symsStackDelta ::: stack
-    override def addSymbolBefore(sym: StackSymbol): Option[StackOperation] =
-      Some(new Push(top, (sym +: syms): _*))
-    override def stackSyms: Set[StackSymbol] = syms.toSet ++ top.toSet
+    override def addSymbolBefore(sym: StackSymbol): SymbolMovementResult =
+      Success(new Push(top, (sym +: syms): _*))
+    override def popSymbolBefore(sym: StackSymbol): SymbolMovementResult = {
+      val Seq(first, rest @ _*) = syms
+      if (first == sym) {
+        // TODO: should this be a no op with a top symbol?
+        if (rest.isEmpty) Success(NoOp) else Success(new Push(top, rest: _*))
+      } else {
+        // TODO: pop first then push?
+      }
+    }
+    override def symsInOperation: Set[StackSymbol] = syms.toSet ++ top
   }
   class Pop(top: StackSymbol) extends StackOperation {
     override val stackTop: Option[StackSymbol] = Some(top)
@@ -68,28 +110,40 @@ object Build {
       require(!stack.isEmpty, "can't pop empty stack")
       stack.tail
     } ensuring(!_.isEmpty, "popping stack should never be empty")
-    override def addSymbolBefore(sym: StackSymbol): Option[StackOperation] =
-      if (top == sym) Some(NoOp) else None
-    override def stackSyms: Set[StackSymbol] = Set(top)
+    override def addSymbolBefore(sym: StackSymbol): SymbolMovementResult =
+      if (top == sym) Success(NoOp) else Failure
+    override def popSymbolBefore(sym: StackSymbol): SymbolMovementResult =
+      FollowMoreTransitions
+    override def symsInOperation: Set[StackSymbol] = Set(top)
+  }
+  class NoOpWithTop(top: StackSymbol) extends StackOperation {
+    override val stackTop: Option[StackSymbol] = Some(top)
+    override def invoke(stack: List[StackSymbol]): List[StackSymbol] = stack
+    override def addSymbolBefore(sym: StackSymbol): SymbolMovementResult =
+      Success(new Push(Some(top), sym))
+    override def popSymbolBefore(sym: StackSymbol): SymbolMovementResult =
+
   }
   object NoOp extends StackOperation {
     override val stackTop: Option[StackSymbol] = None
     override def invoke(stack: List[StackSymbol]): List[StackSymbol] = stack
-    override def addSymbolBefore(sym: StackSymbol): Option[StackOperation] =
-      Some(new Push(None, sym))
-    override def stackSyms: Set[StackSymbol] = Set.empty
+    override def addSymbolBefore(sym: StackSymbol): SymbolMovementResult =
+      Success(new Push(None, sym))
+    override def popSymbolBefore(sym: StackSymbol): SymbolMovementResult =
+      Success(new Pop(sym))
+    override def symsInOperation: Set[StackSymbol] = Set.empty
   }
 
   case class Transition[T](
     from: State,
     to: State,
     token: Option[Token[T]] = None,
-    trans: Option[Transition[T]] = None
+    op: Option[StackOperation] = None
   ) {
     def stackSyms: Set[StackSymbol] =
-      trans.map(_.stackSyms).getOrElse(Set.empty)
+      op.map(_.symsInOperation).getOrElse(Set.empty)
     def mapStates(map: (State => State)): Transition[T] =
-      Transition[T](map(from), map(to), token, trans)
+      Transition[T](map(from), map(to), token, op)
   }
   object Transition {
     def Epsilon[T](from: State, to: State): Transition[T] = Transition(from, to)
